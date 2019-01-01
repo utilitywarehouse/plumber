@@ -13,6 +13,7 @@ import (
 	"github.com/uw-labs/substrate"
 	_ "github.com/uw-labs/substrate/freezer"
 	_ "github.com/uw-labs/substrate/natsstreaming"
+	_ "github.com/uw-labs/substrate/proximo"
 	"github.com/uw-labs/substrate/suburl"
 	"golang.org/x/sync/errgroup"
 )
