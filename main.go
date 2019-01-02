@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -67,6 +69,24 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				err := doDrain(context.Background(), c.String("sourceurl"), c.Bool("progress"))
+				if err != nil {
+					log.Println(err.Error())
+				}
+				return nil
+			},
+		},
+		{
+			Name:  "produce",
+			Usage: "produce a message to a stream, reading from STDIN",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "desturl",
+					Usage: "substrate URL for message destination",
+					Value: fmt.Sprintf("nats-streaming://localhost:4222/subject1?cluster-id=test-cluster"),
+				},
+			},
+			Action: func(c *cli.Context) error {
+				err := doProduce(context.Background(), c.String("desturl"))
 				if err != nil {
 					log.Println(err.Error())
 				}
@@ -146,6 +166,38 @@ func doDrain(ctx context.Context, sourceURL string, progress bool) error {
 	})
 
 	return g.Wait()
+}
+
+func doProduce(ctx context.Context, destURL string) error {
+
+	dest, err := suburl.NewSink(destURL)
+	if err != nil {
+		return errors.Wrapf(err, "error connecting to destination %s", destURL)
+	}
+
+	x := substrate.NewSynchronousMessageSink(dest)
+	defer x.Close()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, os.Stdin); err != nil {
+		return err
+	}
+
+	msg := &message{buf.Bytes()}
+
+	if err := x.PublishMessage(ctx, msg); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type message struct {
+	data []byte
+}
+
+func (m *message) Data() []byte {
+	return m.data
 }
 
 func count(ctx context.Context, in <-chan substrate.Message, out chan<- substrate.Message) error {
