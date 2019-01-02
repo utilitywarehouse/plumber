@@ -12,6 +12,7 @@ import (
 	"github.com/urfave/cli"
 	"github.com/uw-labs/substrate"
 	_ "github.com/uw-labs/substrate/freezer"
+	_ "github.com/uw-labs/substrate/kafka"
 	_ "github.com/uw-labs/substrate/natsstreaming"
 	_ "github.com/uw-labs/substrate/proximo"
 	"github.com/uw-labs/substrate/suburl"
