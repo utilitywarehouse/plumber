@@ -301,6 +301,11 @@ func consumeAllProtoJSON(ctx context.Context, sourceURL string) error {
 					return err
 				}
 				je.Encode(x)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case acks <- m:
+				}
 			}
 		}
 	})
