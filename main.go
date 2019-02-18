@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
+	"github.com/uw-labs/protoid"
 	"github.com/uw-labs/substrate"
 	_ "github.com/uw-labs/substrate/freezer"
 	_ "github.com/uw-labs/substrate/kafka"
@@ -109,6 +111,24 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				err := doDrainNoAck(context.Background(), c.String("sourceurl"))
+				if err != nil {
+					log.Println(err.Error())
+				}
+				return nil
+			},
+		},
+		{
+			Name:  "consume-all-protojson",
+			Usage: "read all messages from a stream, naively converting proto to JSON and writing to STDOUT",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "sourceurl",
+					Usage: "substrate URL for message source",
+					Value: fmt.Sprintf("nats-streaming://localhost:4222/sink.emitter.products?cluster-id=test-cluster&queue-group=%s", uuid.New().String()),
+				},
+			},
+			Action: func(c *cli.Context) error {
+				err := consumeAllProtoJSON(context.Background(), c.String("sourceurl"))
 				if err != nil {
 					log.Println(err.Error())
 				}
@@ -245,6 +265,42 @@ func doDrainNoAck(ctx context.Context, sourceURL string) error {
 				return ctx.Err()
 			case <-incoming:
 				println("got a message")
+			}
+		}
+	})
+
+	return g.Wait()
+}
+
+func consumeAllProtoJSON(ctx context.Context, sourceURL string) error {
+	source, err := suburl.NewSource(sourceURL)
+	if err != nil {
+		return errors.Wrapf(err, "error connecting to source %s", sourceURL)
+	}
+	defer source.Close()
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	incoming := make(chan substrate.Message, 256)
+	acks := make(chan substrate.Message, 256)
+
+	g.Go(func() error {
+		return source.ConsumeMessages(ctx, incoming, acks)
+	})
+
+	g.Go(func() error {
+		je := json.NewEncoder(os.Stdout)
+		je.SetIndent("  ", "  ")
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case m := <-incoming:
+				x, err := protoid.Decode(m.Data())
+				if err != nil {
+					return err
+				}
+				je.Encode(x)
 			}
 		}
 	})
