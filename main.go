@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -111,6 +113,24 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				err := doDrainNoAck(context.Background(), c.String("sourceurl"))
+				if err != nil {
+					log.Println(err.Error())
+				}
+				return nil
+			},
+		},
+		{
+			Name:  "consume-all-base64",
+			Usage: "read all messages from a stream, writing each message as a line as base64 encoded to STDOUT",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "sourceurl",
+					Usage: "substrate URL for message source",
+					Value: fmt.Sprintf("nats-streaming://localhost:4222/topic1?cluster-id=test-cluster&queue-group=%s", uuid.New().String()),
+				},
+			},
+			Action: func(c *cli.Context) error {
+				err := consumeAllBase64(context.Background(), c.String("sourceurl"))
 				if err != nil {
 					log.Println(err.Error())
 				}
@@ -265,6 +285,46 @@ func doDrainNoAck(ctx context.Context, sourceURL string) error {
 				return ctx.Err()
 			case <-incoming:
 				println("got a message")
+			}
+		}
+	})
+
+	return g.Wait()
+}
+
+func consumeAllBase64(ctx context.Context, sourceURL string) error {
+	source, err := suburl.NewSource(sourceURL)
+	if err != nil {
+		return errors.Wrapf(err, "error connecting to source %s", sourceURL)
+	}
+	defer source.Close()
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	incoming := make(chan substrate.Message, 256)
+	acks := make(chan substrate.Message, 256)
+
+	g.Go(func() error {
+		return source.ConsumeMessages(ctx, incoming, acks)
+	})
+
+	g.Go(func() error {
+		bw := bufio.NewWriter(os.Stdout)
+
+		be := base64.NewEncoder(base64.StdEncoding, bw)
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case m := <-incoming:
+				be.Write(m.Data())
+				bw.WriteByte('\n')
+				bw.Flush()
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case acks <- m:
+				}
 			}
 		}
 	})
