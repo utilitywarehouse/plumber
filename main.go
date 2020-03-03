@@ -161,7 +161,6 @@ func main() {
 }
 
 func doCopy(ctx context.Context, sourceURL string, destURL string, progress bool) error {
-
 	source, err := suburl.NewSource(sourceURL)
 	if err != nil {
 		return errors.Wrapf(err, "error connecting to source %s", sourceURL)
@@ -231,7 +230,6 @@ func doDrain(ctx context.Context, sourceURL string, progress bool) error {
 }
 
 func doProduce(ctx context.Context, destURL string) error {
-
 	dest, err := suburl.NewSink(destURL)
 	if err != nil {
 		return errors.Wrapf(err, "error connecting to destination %s", destURL)
@@ -374,7 +372,6 @@ func consumeAllProtoJSON(ctx context.Context, sourceURL string) error {
 }
 
 func count(ctx context.Context, in <-chan substrate.Message, out chan<- substrate.Message) error {
-
 	counter := make(chan struct{}, 128)
 
 	g, _ := errgroup.WithContext(ctx)
