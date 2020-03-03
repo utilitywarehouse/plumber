@@ -291,46 +291,32 @@ func doDrainNoAck(ctx context.Context, sourceURL string) error {
 }
 
 func consumeAllBase64(ctx context.Context, sourceURL string) error {
-	source, err := suburl.NewSource(sourceURL)
-	if err != nil {
-		return errors.Wrapf(err, "error connecting to source %s", sourceURL)
-	}
-	defer source.Close()
-
-	g, ctx := errgroup.WithContext(ctx)
-
-	incoming := make(chan substrate.Message, 256)
-	acks := make(chan substrate.Message, 256)
-
-	g.Go(func() error {
-		return source.ConsumeMessages(ctx, incoming, acks)
-	})
-
-	g.Go(func() error {
-		bw := bufio.NewWriter(os.Stdout)
-
-		be := base64.NewEncoder(base64.StdEncoding, bw)
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case m := <-incoming:
-				be.Write(m.Data())
-				bw.WriteByte('\n')
-				bw.Flush()
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case acks <- m:
-				}
-			}
+	bw := bufio.NewWriter(os.Stdout)
+	be := base64.NewEncoder(base64.StdEncoding, bw)
+	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
+		if _, err := be.Write(m.Data()); err != nil {
+			return err
 		}
+		if err := bw.WriteByte('\n'); err != nil {
+			return err
+		}
+		return bw.Flush()
 	})
-
-	return g.Wait()
 }
 
 func consumeAllProtoJSON(ctx context.Context, sourceURL string) error {
+	je := json.NewEncoder(os.Stdout)
+	je.SetIndent("  ", "  ")
+	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
+		x, err := protoid.Decode(m.Data())
+		if err != nil {
+			return err
+		}
+		return je.Encode(x)
+	})
+}
+
+func consumeAllGeneric(ctx context.Context, sourceURL string, mw func(m substrate.Message) error) error {
 	source, err := suburl.NewSource(sourceURL)
 	if err != nil {
 		return errors.Wrapf(err, "error connecting to source %s", sourceURL)
@@ -347,18 +333,15 @@ func consumeAllProtoJSON(ctx context.Context, sourceURL string) error {
 	})
 
 	g.Go(func() error {
-		je := json.NewEncoder(os.Stdout)
-		je.SetIndent("  ", "  ")
+
 		for {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case m := <-incoming:
-				x, err := protoid.Decode(m.Data())
-				if err != nil {
+				if err := mw(m); err != nil {
 					return err
 				}
-				je.Encode(x)
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
