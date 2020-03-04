@@ -323,11 +323,12 @@ func consumeAllRaw(ctx context.Context, sourceURL string) error {
 
 func consumeAllBase64(ctx context.Context, sourceURL string) error {
 	bw := bufio.NewWriter(os.Stdout)
-	be := base64.NewEncoder(base64.StdEncoding, bw)
 	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
+		be := base64.NewEncoder(base64.StdEncoding, bw)
 		if _, err := be.Write(m.Data()); err != nil {
 			return err
 		}
+		be.Close()
 		if err := bw.WriteByte('\n'); err != nil {
 			return err
 		}
