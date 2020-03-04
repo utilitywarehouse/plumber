@@ -120,6 +120,24 @@ func main() {
 			},
 		},
 		{
+			Name:  "consume-all-raw",
+			Usage: "read all messages from a stream, writing each message to STDOUT, each on a new line",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "sourceurl",
+					Usage: "substrate URL for message source",
+					Value: fmt.Sprintf("nats-streaming://localhost:4222/topic1?cluster-id=test-cluster&queue-group=%s", uuid.New().String()),
+				},
+			},
+			Action: func(c *cli.Context) error {
+				err := consumeAllRaw(context.Background(), c.String("sourceurl"))
+				if err != nil {
+					log.Println(err.Error())
+				}
+				return nil
+			},
+		},
+		{
 			Name:  "consume-all-base64",
 			Usage: "read all messages from a stream, writing each message as a line as base64 encoded to STDOUT",
 			Flags: []cli.Flag{
@@ -288,6 +306,19 @@ func doDrainNoAck(ctx context.Context, sourceURL string) error {
 	})
 
 	return g.Wait()
+}
+
+func consumeAllRaw(ctx context.Context, sourceURL string) error {
+	bw := bufio.NewWriter(os.Stdout)
+	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
+		if _, err := bw.Write(m.Data()); err != nil {
+			return err
+		}
+		if err := bw.WriteByte('\n'); err != nil {
+			return err
+		}
+		return bw.Flush()
+	})
 }
 
 func consumeAllBase64(ctx context.Context, sourceURL string) error {
