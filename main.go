@@ -329,7 +329,8 @@ func doDrainNoAck(ctx context.Context, sourceURL string) error {
 
 func consumeAllRaw(ctx context.Context, sourceURL string, newline bool, timeout string) error {
 	bw := bufio.NewWriter(os.Stdout)
-	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
+	defer bw.Flush()
+	if err := consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
 		if _, err := bw.Write(m.Data()); err != nil {
 			return err
 		}
@@ -338,13 +339,17 @@ func consumeAllRaw(ctx context.Context, sourceURL string, newline bool, timeout 
 				return err
 			}
 		}
-		return bw.Flush()
-	}, timeout)
+		return nil
+	}, timeout); err != nil {
+		return err
+	}
+	return bw.Flush()
 }
 
 func consumeAllBase64(ctx context.Context, sourceURL string, timeout string) error {
 	bw := bufio.NewWriter(os.Stdout)
-	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
+	defer bw.Flush()
+	if err := consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
 		be := base64.NewEncoder(base64.StdEncoding, bw)
 		if _, err := be.Write(m.Data()); err != nil {
 			return err
@@ -353,8 +358,11 @@ func consumeAllBase64(ctx context.Context, sourceURL string, timeout string) err
 		if err := bw.WriteByte('\n'); err != nil {
 			return err
 		}
-		return bw.Flush()
-	}, timeout)
+		return nil
+	}, timeout); err != nil {
+		return err
+	}
+	return bw.Flush()
 }
 
 func consumeAllProtoJSON(ctx context.Context, sourceURL string, timeout string) error {
