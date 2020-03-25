@@ -121,16 +121,20 @@ func main() {
 		},
 		{
 			Name:  "consume-all-raw",
-			Usage: "read all messages from a stream, writing each message to STDOUT, each on a new line",
+			Usage: "read all messages from a stream, writing each message to STDOUT",
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  "sourceurl",
 					Usage: "substrate URL for message source",
 					Value: fmt.Sprintf("nats-streaming://localhost:4222/topic1?cluster-id=test-cluster&queue-group=%s", uuid.New().String()),
 				},
+				cli.BoolFlag{
+					Name:  "newline",
+					Usage: "separate each message with a newline",
+				},
 			},
 			Action: func(c *cli.Context) error {
-				err := consumeAllRaw(context.Background(), c.String("sourceurl"))
+				err := consumeAllRaw(context.Background(), c.String("sourceurl"), c.Bool("newline"))
 				if err != nil {
 					log.Println(err.Error())
 				}
@@ -308,14 +312,16 @@ func doDrainNoAck(ctx context.Context, sourceURL string) error {
 	return g.Wait()
 }
 
-func consumeAllRaw(ctx context.Context, sourceURL string) error {
+func consumeAllRaw(ctx context.Context, sourceURL string, newline bool) error {
 	bw := bufio.NewWriter(os.Stdout)
 	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
 		if _, err := bw.Write(m.Data()); err != nil {
 			return err
 		}
-		if err := bw.WriteByte('\n'); err != nil {
-			return err
+		if newline {
+			if err := bw.WriteByte('\n'); err != nil {
+				return err
+			}
 		}
 		return bw.Flush()
 	})
@@ -365,7 +371,6 @@ func consumeAllGeneric(ctx context.Context, sourceURL string, mw func(m substrat
 	})
 
 	g.Go(func() error {
-
 		for {
 			select {
 			case <-ctx.Done():
