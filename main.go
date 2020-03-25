@@ -132,9 +132,14 @@ func main() {
 					Name:  "newline",
 					Usage: "separate each message with a newline",
 				},
+				cli.StringFlag{
+					Name:  "timeout",
+					Usage: "After comsuming no new messages for this long, exit.  Set to 0s to disable",
+					Value: "0s",
+				},
 			},
 			Action: func(c *cli.Context) error {
-				err := consumeAllRaw(context.Background(), c.String("sourceurl"), c.Bool("newline"))
+				err := consumeAllRaw(context.Background(), c.String("sourceurl"), c.Bool("newline"), c.String("timeout"))
 				if err != nil {
 					log.Println(err.Error())
 				}
@@ -150,9 +155,14 @@ func main() {
 					Usage: "substrate URL for message source",
 					Value: fmt.Sprintf("nats-streaming://localhost:4222/topic1?cluster-id=test-cluster&queue-group=%s", uuid.New().String()),
 				},
+				cli.StringFlag{
+					Name:  "timeout",
+					Usage: "After comsuming no new messages for this long, exit.  Set to 0s to disable",
+					Value: "0s",
+				},
 			},
 			Action: func(c *cli.Context) error {
-				err := consumeAllBase64(context.Background(), c.String("sourceurl"))
+				err := consumeAllBase64(context.Background(), c.String("sourceurl"), c.String("timeout"))
 				if err != nil {
 					log.Println(err.Error())
 				}
@@ -168,9 +178,14 @@ func main() {
 					Usage: "substrate URL for message source",
 					Value: fmt.Sprintf("nats-streaming://localhost:4222/sink.emitter.products?cluster-id=test-cluster&queue-group=%s", uuid.New().String()),
 				},
+				cli.StringFlag{
+					Name:  "timeout",
+					Usage: "After comsuming no new messages for this long, exit.  Set to 0s to disable",
+					Value: "0s",
+				},
 			},
 			Action: func(c *cli.Context) error {
-				err := consumeAllProtoJSON(context.Background(), c.String("sourceurl"))
+				err := consumeAllProtoJSON(context.Background(), c.String("sourceurl"), c.String("timeout"))
 				if err != nil {
 					log.Println(err.Error())
 				}
@@ -312,7 +327,7 @@ func doDrainNoAck(ctx context.Context, sourceURL string) error {
 	return g.Wait()
 }
 
-func consumeAllRaw(ctx context.Context, sourceURL string, newline bool) error {
+func consumeAllRaw(ctx context.Context, sourceURL string, newline bool, timeout string) error {
 	bw := bufio.NewWriter(os.Stdout)
 	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
 		if _, err := bw.Write(m.Data()); err != nil {
@@ -324,10 +339,10 @@ func consumeAllRaw(ctx context.Context, sourceURL string, newline bool) error {
 			}
 		}
 		return bw.Flush()
-	})
+	}, timeout)
 }
 
-func consumeAllBase64(ctx context.Context, sourceURL string) error {
+func consumeAllBase64(ctx context.Context, sourceURL string, timeout string) error {
 	bw := bufio.NewWriter(os.Stdout)
 	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
 		be := base64.NewEncoder(base64.StdEncoding, bw)
@@ -339,10 +354,10 @@ func consumeAllBase64(ctx context.Context, sourceURL string) error {
 			return err
 		}
 		return bw.Flush()
-	})
+	}, timeout)
 }
 
-func consumeAllProtoJSON(ctx context.Context, sourceURL string) error {
+func consumeAllProtoJSON(ctx context.Context, sourceURL string, timeout string) error {
 	je := json.NewEncoder(os.Stdout)
 	je.SetIndent("  ", "  ")
 	return consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
@@ -351,10 +366,18 @@ func consumeAllProtoJSON(ctx context.Context, sourceURL string) error {
 			return err
 		}
 		return je.Encode(x)
-	})
+	}, timeout)
 }
 
-func consumeAllGeneric(ctx context.Context, sourceURL string, mw func(m substrate.Message) error) error {
+func consumeAllGeneric(ctx context.Context, sourceURL string, mw func(m substrate.Message) error, timeoutString string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	timeout, err := time.ParseDuration(timeoutString)
+	if err != nil {
+		return fmt.Errorf("failed to parse timeout value : %s", err.Error())
+	}
+
 	source, err := suburl.NewSource(sourceURL)
 	if err != nil {
 		return errors.Wrapf(err, "error connecting to source %s", sourceURL)
@@ -370,14 +393,28 @@ func consumeAllGeneric(ctx context.Context, sourceURL string, mw func(m substrat
 		return source.ConsumeMessages(ctx, incoming, acks)
 	})
 
+	var c <-chan time.Time
+
+	var t *time.Timer
+
+	if timeout != 0 {
+		t = time.NewTimer(timeout)
+		c = t.C
+	}
+
 	g.Go(func() error {
 		for {
 			select {
+			case <-c:
+				cancel()
 			case <-ctx.Done():
 				return ctx.Err()
 			case m := <-incoming:
 				if err := mw(m); err != nil {
 					return err
+				}
+				if timeout != 0 {
+					t.Reset(timeout)
 				}
 				select {
 				case <-ctx.Done():
@@ -388,7 +425,10 @@ func consumeAllGeneric(ctx context.Context, sourceURL string, mw func(m substrat
 		}
 	})
 
-	return g.Wait()
+	if err := g.Wait(); err != nil && err != context.Canceled {
+		return err
+	}
+	return err
 }
 
 func count(ctx context.Context, in <-chan substrate.Message, out chan<- substrate.Message) error {
