@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"encoding/ascii85"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -140,6 +141,29 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				err := consumeAllRaw(context.Background(), c.String("sourceurl"), c.Bool("newline"), c.String("timeout"))
+				if err != nil {
+					log.Println(err.Error())
+				}
+				return nil
+			},
+		},
+		{
+			Name:  "consume-all-ascii85",
+			Usage: "read all messages from a stream, writing each message as a line as ascii85 encoded to STDOUT",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "sourceurl",
+					Usage: "substrate URL for message source",
+					Value: fmt.Sprintf("nats-streaming://localhost:4222/topic1?cluster-id=test-cluster&queue-group=%s", uuid.New().String()),
+				},
+				cli.StringFlag{
+					Name:  "timeout",
+					Usage: "After comsuming no new messages for this long, exit.  Set to 0s to disable",
+					Value: "0s",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				err := consumeAllAscii85(context.Background(), c.String("sourceurl"), c.String("timeout"))
 				if err != nil {
 					log.Println(err.Error())
 				}
@@ -338,6 +362,25 @@ func consumeAllRaw(ctx context.Context, sourceURL string, newline bool, timeout 
 			if err := bw.WriteByte('\n'); err != nil {
 				return err
 			}
+		}
+		return nil
+	}, timeout); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+func consumeAllAscii85(ctx context.Context, sourceURL string, timeout string) error {
+	bw := bufio.NewWriter(os.Stdout)
+	defer bw.Flush()
+	if err := consumeAllGeneric(ctx, sourceURL, func(m substrate.Message) error {
+		be := ascii85.NewEncoder(bw)
+		if _, err := be.Write(m.Data()); err != nil {
+			return err
+		}
+		be.Close()
+		if err := bw.WriteByte('\n'); err != nil {
+			return err
 		}
 		return nil
 	}, timeout); err != nil {
