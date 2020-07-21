@@ -234,7 +234,7 @@ func doCopy(ctx context.Context, sourceURL string, destURL string, progress bool
 	}
 	defer dest.Close()
 
-	incoming := make(chan substrate.Message, 256)
+	incoming := make(chan substrate.Message, 16)
 	acks := make(chan substrate.Message, 16)
 
 	g, ctx := errgroup.WithContext(ctx)
